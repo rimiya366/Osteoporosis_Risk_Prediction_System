@@ -1,0 +1,13 @@
+# Core Data Manipulation & Math
+numpy
+pandas
+
+# Data Visualization
+matplotlib
+seaborn
+
+# Machine Learning & Preprocessing (scikit-learn)
+scikit-learn
+
+# Advanced Machine Learning Algorithms
+xgboost
