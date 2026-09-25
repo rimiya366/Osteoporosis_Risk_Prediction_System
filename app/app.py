@@ -20,14 +20,13 @@ st.set_page_config(
 # ---------------------------------------------------------
 @st.cache_resource
 def load_pipeline():
-    # Find root project directory (one level up from app/)
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(current_dir)
     
-    # Path to models folder
+    # Check inside models/ folder
     model_path = os.path.join(project_root, 'models', 'osteoporosis_gb_pipeline.pkl')
     
-    # Fallback check: in case model is placed directly in app/ directory
+    # Fallback to app/ directory
     if not os.path.exists(model_path):
         model_path = os.path.join(current_dir, 'osteoporosis_gb_pipeline.pkl')
 
@@ -57,7 +56,7 @@ This clinical decision-support tool utilizes a **Gradient Boosting Classifier** 
 st.sidebar.header("📋 Patient Clinical Profile")
 
 if model is not None:
-    # Input controls
+    # Sidebar Input controls
     age = st.sidebar.slider("Age", min_value=18, max_value=95, value=50, step=1)
     gender = st.sidebar.selectbox("Gender", options=["Female", "Male"])
     hormonal_changes = st.sidebar.selectbox("Hormonal Changes", options=["Normal", "Postmenopausal"])
@@ -73,7 +72,7 @@ if model is not None:
     medications = st.sidebar.selectbox("Medications", options=["None", "Corticosteroids"])
     prior_fractures = st.sidebar.selectbox("Prior Fractures", options=["No", "Yes"])
 
-    # Raw user inputs matched to Jupyter training column names
+    # Build raw input dataframe matching Jupyter training schema
     raw_input_data = pd.DataFrame([{
         'Age': age,
         'Gender': gender,
@@ -100,28 +99,44 @@ if model is not None:
     with col2:
         st.subheader("Prediction Analysis")
         
+        # ---------------------------------------------------------
+        # Robust Feature Preprocessing & Alignment
+        # ---------------------------------------------------------
         try:
-            # Check if model requires raw features or explicit dummy encoding
-            if hasattr(model, 'named_steps') or expected_features is None:
-                # Full pipeline handling internal encoding
-                probabilities = model.predict_proba(raw_input_data)
-            else:
-                # Pre-encoded model fallback
-                encoded_df = pd.get_dummies(raw_input_data)
-                aligned_df = encoded_df.reindex(columns=expected_features, fill_value=0)
-                probabilities = model.predict_proba(aligned_df)
+            # Check model feature expectations
+            model_cols = expected_features if expected_features is not None else getattr(model, 'feature_names_in_', None)
 
+            if hasattr(model, 'named_steps'):
+                # If full pipeline with built-in encoder
+                input_for_model = raw_input_data
+            elif model_cols is not None:
+                # If model expects pre-encoded dummy columns
+                encoded_df = pd.get_dummies(raw_input_data)
+                
+                # Reindex columns to match exact trained order and fill missing with 0
+                aligned_df = encoded_df.reindex(columns=model_cols, fill_value=0)
+                
+                # Preserve numeric columns (like 'Age')
+                for col in raw_input_data.select_dtypes(include=[np.number]).columns:
+                    if col in aligned_df.columns:
+                        aligned_df[col] = raw_input_data[col].values
+                        
+                input_for_model = aligned_df
+            else:
+                input_for_model = raw_input_data
+
+            # Predict probability for Class 1 (High Risk)
+            probabilities = model.predict_proba(input_for_model)
             risk_probability = float(probabilities[0, 1])
 
         except Exception as e:
-            st.error(f"Prediction Error: {e}")
-            st.info("Ensure input column names match the exact column names used in your Jupyter notebook.")
+            st.error(f"Prediction Execution Error: {e}")
             risk_probability = 0.0
 
+        # UI Gauge & Risk Level Display
         threshold = st.slider("Clinical Decision Threshold", min_value=0.20, max_value=0.80, value=0.50, step=0.05)
         predicted_class = 1 if risk_probability >= threshold else 0
 
-        # Gauge Chart
         fig = go.Figure(go.Indicator(
             mode="gauge+number",
             value=risk_probability * 100,
@@ -150,6 +165,17 @@ if model is not None:
         else:
             st.success(f"✅ **LOW RISK DETECTED** (Probability: {risk_probability:.1%})")
             st.info("Recommendation: Maintain routine health monitoring.")
+
+        # ---------------------------------------------------------
+        # Interactive Debug Block
+        # ---------------------------------------------------------
+        with st.expander("🔍 Debug Feature Alignment & Model Inputs"):
+            st.write("**Raw Probability Output:**", probabilities)
+            if model_cols is not None:
+                st.write(f"**Expected Features ({len(model_cols)} total):**")
+                st.code(list(model_cols))
+                st.write("**Processed DataFrame Sent to Model:**")
+                st.dataframe(input_for_model)
 
 else:
     st.error("Model assets file (`osteoporosis_gb_pipeline.pkl`) not found in `models/` directory.")
