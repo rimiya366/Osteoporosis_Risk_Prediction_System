@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. Asset Loader Function (Looks inside models/ directory)
+# 2. Asset Loader Function
 # ---------------------------------------------------------
 @st.cache_resource
 def load_pipeline():
@@ -73,6 +73,7 @@ if model is not None:
     medications = st.sidebar.selectbox("Medications", options=["None", "Corticosteroids"])
     prior_fractures = st.sidebar.selectbox("Prior Fractures", options=["No", "Yes"])
 
+    # Raw user inputs matched to Jupyter training column names
     raw_input_data = pd.DataFrame([{
         'Age': age,
         'Gender': gender,
@@ -90,15 +91,6 @@ if model is not None:
         'Prior Fractures': prior_fractures
     }])
 
-    # Preprocessing
-    def preprocess_input(raw_df, feature_list):
-        encoded_df = pd.get_dummies(raw_df)
-        if feature_list is not None:
-            return encoded_df.reindex(columns=feature_list, fill_value=0)
-        return encoded_df
-
-    processed_input = preprocess_input(raw_input_data, expected_features)
-
     col1, col2 = st.columns([1, 1])
 
     with col1:
@@ -108,10 +100,24 @@ if model is not None:
     with col2:
         st.subheader("Prediction Analysis")
         
-        # Robust 2D Indexing for predict_proba
-        probabilities = model.predict_proba(processed_input)
-        risk_probability = float(probabilities[0, 1])
-        
+        try:
+            # Check if model requires raw features or explicit dummy encoding
+            if hasattr(model, 'named_steps') or expected_features is None:
+                # Full pipeline handling internal encoding
+                probabilities = model.predict_proba(raw_input_data)
+            else:
+                # Pre-encoded model fallback
+                encoded_df = pd.get_dummies(raw_input_data)
+                aligned_df = encoded_df.reindex(columns=expected_features, fill_value=0)
+                probabilities = model.predict_proba(aligned_df)
+
+            risk_probability = float(probabilities[0, 1])
+
+        except Exception as e:
+            st.error(f"Prediction Error: {e}")
+            st.info("Ensure input column names match the exact column names used in your Jupyter notebook.")
+            risk_probability = 0.0
+
         threshold = st.slider("Clinical Decision Threshold", min_value=0.20, max_value=0.80, value=0.50, step=0.05)
         predicted_class = 1 if risk_probability >= threshold else 0
 
