@@ -1,14 +1,9 @@
-# Core Data Manipulation & Math
-numpy
+streamlit
+joblib
 pandas
-
-# Data Visualization
+numpy
+scikit-learn
+xgboost
 matplotlib
 seaborn
-
-# Machine Learning & Preprocessing (scikit-learn)
-scikit-learn
-joblib 
-
-# Advanced Machine Learning Algorithms
-xgboost
+plotly
