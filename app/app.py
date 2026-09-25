@@ -1,7 +1,8 @@
-import streamlit as st
+import os
+import joblib
 import pandas as pd
 import numpy as np
-import joblib
+import streamlit as st
 import plotly.graph_objects as go
 
 # ---------------------------------------------------------
@@ -15,22 +16,25 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. Asset Loader Function (Handles both dict and direct model)
+# 2. Asset Loader Function (Looks inside models/ directory)
 # ---------------------------------------------------------
-import os
-import joblib
-import streamlit as st
-
 @st.cache_resource
 def load_pipeline():
-    # Dynamically locate the directory where app.py resides
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(script_dir, 'osteoporosis_gb_pipeline.pkl')
+    # Find root project directory (one level up from app/)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
     
+    # Path to models folder
+    model_path = os.path.join(project_root, 'models', 'osteoporosis_gb_pipeline.pkl')
+    
+    # Fallback check: in case model is placed directly in app/ directory
     if not os.path.exists(model_path):
-        st.error(f"Missing file at path: {model_path}")
+        model_path = os.path.join(current_dir, 'osteoporosis_gb_pipeline.pkl')
+
+    if not os.path.exists(model_path):
+        st.error(f"Missing model file at path: {model_path}")
         return None, None
-        
+
     try:
         loaded_object = joblib.load(model_path)
         if isinstance(loaded_object, dict):
@@ -104,7 +108,7 @@ if model is not None:
     with col2:
         st.subheader("Prediction Analysis")
         
-        # FIX: Robust 2D Indexing [0, 1] for predict_proba
+        # Robust 2D Indexing for predict_proba
         probabilities = model.predict_proba(processed_input)
         risk_probability = float(probabilities[0, 1])
         
@@ -142,4 +146,4 @@ if model is not None:
             st.info("Recommendation: Maintain routine health monitoring.")
 
 else:
-    st.error("Model assets file (`osteoporosis_gb_pipeline.pkl`) not found or could not be loaded. Ensure the file exists in the same directory.")
+    st.error("Model assets file (`osteoporosis_gb_pipeline.pkl`) not found in `models/` directory.")
