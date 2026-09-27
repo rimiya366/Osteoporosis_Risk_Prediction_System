@@ -1,181 +1,127 @@
-import os
-import joblib
+import streamlit as st
 import pandas as pd
 import numpy as np
-import streamlit as st
-import plotly.graph_objects as go
+import joblib
 
-# ---------------------------------------------------------
-# 1. Page Configuration
-# ---------------------------------------------------------
+# Set page configuration
 st.set_page_config(
-    page_title="Osteoporosis Risk Assessor",
+    page_title="Osteoporosis Risk Predictor",
     page_icon="🦴",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# ---------------------------------------------------------
-# 2. Asset Loader Function
-# ---------------------------------------------------------
+# Title and description
+st.title("🦴 Osteoporosis Risk Prediction App")
+st.write("Enter patient medical details below to evaluate the predicted osteoporosis risk.")
+
+# --- LOAD TRAINED MODEL & SCALER ---
 @st.cache_resource
-def load_pipeline():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
+def load_artifacts():
+    # Replace these filenames with the exact paths where you saved your model and scaler
+    # e.g., joblib.dump(best_gb_model, 'best_gb_model.pkl')
+    # e.g., joblib.dump(scaler, 'age_scaler.pkl')
+    model = joblib.load('best_gb_model.pkl')
+    scaler = joblib.load('age_scaler.pkl')
+    return model, scaler
+
+try:
+    best_gb_model, scaler = load_artifacts()
+    st.success("Model and Scaler loaded successfully!")
+except Exception as e:
+    st.error(f"Error loading model artifacts: {e}")
+    st.info("Make sure 'best_gb_model.pkl' and 'age_scaler.pkl' are saved in the same directory.")
+    st.stop()
+
+# --- INPUT FORM ---
+st.subheader("Patient Clinical Profile")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    age = st.number_input("Age", min_value=18, max_value=100, value=45, step=1)
+    gender = st.selectbox("Gender", options=[("Female", 1), ("Male", 0)], format_func=lambda x: x[0])[1]
+    ethnicity = st.selectbox("Race / Ethnicity", options=["Asian", "Caucasian", "Other"])
+    body_weight = st.selectbox("Body Weight Category", options=[("Normal / Healthy", 1), ("Low / Underweight", 0)], format_func=lambda x: x[0])[1]
+    medical_condition = st.selectbox("Medical Condition", options=["None", "Rheumatoid Arthritis", "Unknown"])
+
+with col2:
+    hormonal_changes = st.selectbox("Hormonal Changes", options=[("No", 0), ("Yes", 1)], format_func=lambda x: x[0])[1]
+    family_history = st.selectbox("Family History of Osteoporosis", options=[("No", 0), ("Yes", 1)], format_func=lambda x: x[0])[1]
+    prior_fractures = st.selectbox("Prior Fractures", options=[("No", 0), ("Yes", 1)], format_func=lambda x: x[0])[1]
+    medications = st.selectbox("Taking High-Risk Medications", options=[("No", 0), ("Yes", 1)], format_func=lambda x: x[0])[1]
+
+with col3:
+    calcium = st.selectbox("Calcium Intake", options=[("Adequate / High", 1), ("Low / Deficient", 0)], format_func=lambda x: x[0])[1]
+    vit_d = st.selectbox("Vitamin D Intake", options=[("Adequate / High", 1), ("Low / Deficient", 0)], format_func=lambda x: x[0])[1]
+    activity = st.selectbox("Physical Activity Level", options=[("Active", 1), ("Sedentary", 0)], format_func=lambda x: x[0])[1]
+    smoking = st.selectbox("Smoking Status", options=[("Non-Smoker", 0), ("Smoker", 1)], format_func=lambda x: x[0])[1]
+    alcohol = st.selectbox("Alcohol Consumption", options=[("Non-Drinker / Moderate", 0), ("High", 1)], format_func=lambda x: x[0])[1]
+
+st.markdown("---")
+
+# --- PREDICTION LOGIC ---
+if st.button("Predict Osteoporosis Risk", type="primary", use_container_width=True):
+    # 1. One-hot encoding logic for categorical selections
+    ethnicity_asian = 1 if ethnicity == "Asian" else 0
+    ethnicity_caucasian = 1 if ethnicity == "Caucasian" else 0
     
-    # Check inside models/ folder
-    model_path = os.path.join(project_root, 'models', 'osteoporosis_gb_pipeline.pkl')
-    
-    # Fallback to app/ directory
-    if not os.path.exists(model_path):
-        model_path = os.path.join(current_dir, 'osteoporosis_gb_pipeline.pkl')
+    medical_ra = 1 if medical_condition == "Rheumatoid Arthritis" else 0
+    medical_unknown = 1 if medical_condition == "Unknown" else 0
 
-    if not os.path.exists(model_path):
-        st.error(f"Missing model file at path: {model_path}")
-        return None, None
+    # 2. Build DataFrame matching model feature order
+    feature_names = [
+        'Age', 'Gender', 'Hormonal Changes', 'Family History', 'Body Weight',
+        'Calcium Intake', 'Vitamin D Intake', 'Physical Activity', 'Smoking',
+        'Alcohol Consumption', 'Medications', 'Prior Fractures',
+        'Race/Ethnicity_Asian', 'Race/Ethnicity_Caucasian',
+        'Medical Conditions_Rheumatoid Arthritis', 'Medical Conditions_Unknown'
+    ]
 
-    try:
-        loaded_object = joblib.load(model_path)
-        if isinstance(loaded_object, dict):
-            return loaded_object.get('model'), loaded_object.get('feature_names')
-        return loaded_object, getattr(loaded_object, 'feature_names_in_', None)
-    except Exception as e:
-        st.error(f"Error loading model pipeline: {e}")
-        return None, None
-
-model, expected_features = load_pipeline()
-
-# ---------------------------------------------------------
-# 3. Header & Sidebar UI
-# ---------------------------------------------------------
-st.title("🦴 Osteoporosis Risk Prediction System")
-st.markdown("""
-This clinical decision-support tool utilizes a **Gradient Boosting Classifier** trained on patient demographic and medical profile data to estimate osteoporosis risk.
-""")
-
-st.sidebar.header("📋 Patient Clinical Profile")
-
-if model is not None:
-    # Sidebar Input controls
-    age = st.sidebar.slider("Age", min_value=18, max_value=95, value=50, step=1)
-    gender = st.sidebar.selectbox("Gender", options=["Female", "Male"])
-    hormonal_changes = st.sidebar.selectbox("Hormonal Changes", options=["Normal", "Postmenopausal"])
-    family_history = st.sidebar.selectbox("Family History of Osteoporosis", options=["No", "Yes"])
-    race_ethnicity = st.sidebar.selectbox("Race/Ethnicity", options=["Caucasian", "Asian", "African American"])
-    body_weight = st.sidebar.selectbox("Body Weight", options=["Normal", "Underweight"])
-    calcium_intake = st.sidebar.selectbox("Calcium Intake", options=["Low", "Adequate"])
-    vitamin_d_intake = st.sidebar.selectbox("Vitamin D Intake", options=["Sufficient", "Insufficient"])
-    physical_activity = st.sidebar.selectbox("Physical Activity", options=["Active", "Sedentary"])
-    smoking = st.sidebar.selectbox("Smoking Status", options=["No", "Yes"])
-    alcohol_consumption = st.sidebar.selectbox("Alcohol Consumption", options=["None", "Moderate"])
-    medical_conditions = st.sidebar.selectbox("Medical Conditions", options=["None", "Hyperthyroidism", "Rheumatoid Arthritis"])
-    medications = st.sidebar.selectbox("Medications", options=["None", "Corticosteroids"])
-    prior_fractures = st.sidebar.selectbox("Prior Fractures", options=["No", "Yes"])
-
-    # Build raw input dataframe matching Jupyter training schema
-    raw_input_data = pd.DataFrame([{
+    patient_data = {
         'Age': age,
         'Gender': gender,
         'Hormonal Changes': hormonal_changes,
         'Family History': family_history,
-        'Race/Ethnicity': race_ethnicity,
         'Body Weight': body_weight,
-        'Calcium Intake': calcium_intake,
-        'Vitamin D Intake': vitamin_d_intake,
-        'Physical Activity': physical_activity,
+        'Calcium Intake': calcium,
+        'Vitamin D Intake': vit_d,
+        'Physical Activity': activity,
         'Smoking': smoking,
-        'Alcohol Consumption': alcohol_consumption,
-        'Medical Conditions': medical_conditions,
+        'Alcohol Consumption': alcohol,
         'Medications': medications,
-        'Prior Fractures': prior_fractures
-    }])
+        'Prior Fractures': prior_fractures,
+        'Race/Ethnicity_Asian': ethnicity_asian,
+        'Race/Ethnicity_Caucasian': ethnicity_caucasian,
+        'Medical Conditions_Rheumatoid Arthritis': medical_ra,
+        'Medical Conditions_Unknown': medical_unknown
+    }
 
-    col1, col2 = st.columns([1, 1])
+    input_df = pd.DataFrame([patient_data], columns=feature_names)
 
-    with col1:
-        st.subheader("Selected Patient Parameters")
-        st.dataframe(raw_input_data.T.rename(columns={0: "Value"}), use_container_width=True)
+    # 3. Scale ONLY the Age feature
+    input_df[['Age']] = scaler.transform(input_df[['Age']])
 
-    with col2:
-        st.subheader("Prediction Analysis")
-        
-        # ---------------------------------------------------------
-        # Robust Feature Preprocessing & Alignment
-        # ---------------------------------------------------------
-        try:
-            # Check model feature expectations
-            model_cols = expected_features if expected_features is not None else getattr(model, 'feature_names_in_', None)
+    # 4. Predict
+    prediction = best_gb_model.predict(input_df)[0]
+    probabilities = best_gb_model.predict_proba(input_df)[0]
+    high_risk_prob = probabilities[1] * 100
 
-            if hasattr(model, 'named_steps'):
-                # If full pipeline with built-in encoder
-                input_for_model = raw_input_data
-            elif model_cols is not None:
-                # If model expects pre-encoded dummy columns
-                encoded_df = pd.get_dummies(raw_input_data)
-                
-                # Reindex columns to match exact trained order and fill missing with 0
-                aligned_df = encoded_df.reindex(columns=model_cols, fill_value=0)
-                
-                # Preserve numeric columns (like 'Age')
-                for col in raw_input_data.select_dtypes(include=[np.number]).columns:
-                    if col in aligned_df.columns:
-                        aligned_df[col] = raw_input_data[col].values
-                        
-                input_for_model = aligned_df
-            else:
-                input_for_model = raw_input_data
-
-            # Predict probability for Class 1 (High Risk)
-            probabilities = model.predict_proba(input_for_model)
-            risk_probability = float(probabilities[0, 1])
-
-        except Exception as e:
-            st.error(f"Prediction Execution Error: {e}")
-            risk_probability = 0.0
-
-        # UI Gauge & Risk Level Display
-        threshold = st.slider("Clinical Decision Threshold", min_value=0.20, max_value=0.80, value=0.50, step=0.05)
-        predicted_class = 1 if risk_probability >= threshold else 0
-
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=risk_probability * 100,
-            number={'suffix': "%"},
-            title={'text': "Osteoporosis Risk Score"},
-            gauge={
-                'axis': {'range': [0, 100]},
-                'bar': {'color': "#2C3E50"},
-                'steps': [
-                    {'range': [0, threshold * 100], 'color': "#2ECC71"},
-                    {'range': [threshold * 100, 100], 'color': "#E74C3C"}
-                ],
-                'threshold': {
-                    'line': {'color': "black", 'width': 4},
-                    'thickness': 0.75,
-                    'value': threshold * 100
-                }
-            }
-        ))
-        fig.update_layout(height=280, margin=dict(l=20, r=20, t=30, b=20))
-        st.plotly_chart(fig, use_container_width=True)
-
-        if predicted_class == 1:
-            st.error(f"⚠️ **HIGH RISK DETECTED** (Probability: {risk_probability:.1%})")
-            st.warning("Recommendation: Diagnostic Bone Mineral Density (BMD) testing advised.")
+    # --- DISPLAY RESULTS ---
+    st.subheader("Assessment Output")
+    
+    res_col1, res_col2 = st.columns([1, 2])
+    
+    with res_col1:
+        if prediction == 1:
+            st.error("⚠️ HIGH RISK DETECTED")
         else:
-            st.success(f"✅ **LOW RISK DETECTED** (Probability: {risk_probability:.1%})")
-            st.info("Recommendation: Maintain routine health monitoring.")
+            st.success("✅ LOW RISK DETECTED")
+            
+    with res_col2:
+        st.metric(label="Osteoporosis Probability", value=f"{high_risk_prob:.2f}%")
+        st.progress(high_risk_prob / 100)
 
-        # ---------------------------------------------------------
-        # Interactive Debug Block
-        # ---------------------------------------------------------
-        with st.expander("🔍 Debug Feature Alignment & Model Inputs"):
-            st.write("**Raw Probability Output:**", probabilities)
-            if model_cols is not None:
-                st.write(f"**Expected Features ({len(model_cols)} total):**")
-                st.code(list(model_cols))
-                st.write("**Processed DataFrame Sent to Model:**")
-                st.dataframe(input_for_model)
-
-else:
-    st.error("Model assets file (`osteoporosis_gb_pipeline.pkl`) not found in `models/` directory.")
+    if prediction == 1:
+        st.warning("Recommendation: Clinical evaluation and Bone Mineral Density (BMD / DEXA) scanning recommended.")
+    else:
+        st.info("Recommendation: Maintain a balanced diet rich in Calcium and Vitamin D, along with regular weight-bearing exercise.")
